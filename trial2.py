@@ -1,18 +1,19 @@
+from typing import Dict,List
 from CustomGroupChat import CustomGroupChat,CustomGroupChatManager
 from autogen import ConversableAgent,GroupChatManager
 import os
 import agentops
 import json
 
-agentops.init()
+# agentops.init()
 
 # The Number Agent always returns the same numbers.
 number_agent = ConversableAgent(
     name="Number_Agent",
     system_message="You return me the numbers I give you, one number each line.",
     llm_config={
-        "config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}],
-        "cache_seed" : 41
+        "config_list": [{"model": "gpt-4o", "api_key": os.environ["OPENAI_API_KEY"]}],
+        "cache_seed" : 45
     },
     human_input_mode="NEVER",
 )
@@ -22,7 +23,7 @@ adder_agent = ConversableAgent(
     name="Adder_Agent",
     system_message="You add 1 to each number I give you and return me the new numbers, one number each line.",
     llm_config={
-        "config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}],
+        "config_list": [{"model": "gpt-4o", "api_key": os.environ["OPENAI_API_KEY"]}],
         "cache_seed" : 45
     },
     human_input_mode="NEVER",
@@ -33,7 +34,7 @@ multiplier_agent = ConversableAgent(
     name="Multiplier_Agent",
     system_message="You multiply each number I give you by 2 and return me the new numbers, one number each line.",
     llm_config={
-        "config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}],
+        "config_list": [{"model": "gpt-4o", "api_key": os.environ["OPENAI_API_KEY"]}],
         "cache_seed" : 45
     },
     human_input_mode="NEVER",
@@ -44,7 +45,7 @@ subtracter_agent = ConversableAgent(
     name="Subtracter_Agent",
     system_message="You subtract 1 from each number I give you and return me the new numbers, one number each line.",
     llm_config={
-        "config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}],
+        "config_list": [{"model": "gpt-4o", "api_key": os.environ["OPENAI_API_KEY"]}],
         "cache_seed" : 45
     },
     human_input_mode="NEVER",
@@ -55,7 +56,7 @@ divider_agent = ConversableAgent(
     name="Divider_Agent",
     system_message="You divide each number I give you by 2 and return me the new numbers, one number each line.",
     llm_config={
-        "config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}],
+        "config_list": [{"model": "gpt-4o", "api_key": os.environ["OPENAI_API_KEY"]}],
         "cache_seed" : 45
     },
     human_input_mode="NEVER",
@@ -67,24 +68,54 @@ subtracter_agent.description = "Subtract 1 from each input number."
 divider_agent.description = "Divide each input number by 2."
 number_agent.description = "Return the numbers given."
 
+def speaker_sel_func(lastspeaker:ConversableAgent,groupchat:CustomGroupChat):
+
+    mess = groupchat.messages
+
+    def clear_and_append(mess:List[Dict],last:int = 1):
+        num = mess[-last:]
+        mess.clear()
+        mess.append(num)
+        
+    if lastspeaker is number_agent:
+        clear_and_append(mess)
+        return multiplier_agent,groupchat.messages
+    elif lastspeaker is multiplier_agent:
+        clear_and_append(mess)
+        return subtracter_agent,groupchat.messages
+    elif lastspeaker is subtracter_agent:
+        clear_and_append(mess)
+        return divider_agent,groupchat.messages
+    elif lastspeaker is divider_agent:
+        clear_and_append(mess)
+        return adder_agent,groupchat.messages
+    elif lastspeaker is adder_agent:
+        if "5.5" not in mess[-1]["content"]:
+            clear_and_append(mess)
+            return adder_agent,groupchat.messages
+        else:
+            clear_and_append(mess)
+            return None,None
+            
+
 group_chat = CustomGroupChat(
     agents=[adder_agent, multiplier_agent, subtracter_agent, divider_agent, number_agent],
     messages=[],
-    max_round=6,
     select_speaker_auto_verbose=True,
+    speaker_selection_method=speaker_sel_func
 )
 
 group_chat_manager = CustomGroupChatManager(
     groupchat = group_chat,
     llm_config={
-        "config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}],
+        "config_list": [{"model": "gpt-4o", "api_key": os.environ["OPENAI_API_KEY"]}],
         "cache_seed" : 45
     },
 )
 
-chat_result = group_chat_manager.initiate_chat(
+chat_result = number_agent.initiate_chat(
     group_chat_manager,
-    message="My number is 3, I want to turn it into 13.",
+    message="3",
     silent=False
 )
 def print_defaultdict(defaultdict_obj):
@@ -138,7 +169,7 @@ def print_chat_result(chat_result):
 # print_defaultdict(group_chat_manager._oai_messages)
 # print("number agent messages: ")
 # print_defaultdict(number_agent._oai_messages)
-print_agent_chat_history(group_chat_manager._oai_messages[divider_agent])
+print_defaultdict(group_chat_manager._oai_messages)
 print("-------------------------------")
-print([group_chat_manager._oai_messages[divider_agent][0],group_chat_manager._oai_messages[divider_agent][-1]])
-agentops.end_session("Success") 
+print(group_chat.messages)
+# agentops.end_session("Success") 
