@@ -1,20 +1,23 @@
 import os
 from dotenv import load_dotenv
 from autogen import UserProxyAgent,AssistantAgent,config_list_from_dotenv,filter_config,Agent
+from typing import List,Dict
+
 
 import agentops
 
-from SYS_MSG import extract_info_prompt,template_agent_prompt
+from SYS_MSG import extract_info_prompt,template_agent_prompt,tester_agent_prompt,docker_agent_prompt,container_agent_prompt
 from agent_skills import ask_human,write_to_file,build_docker_image
-from helper_functions import extract_description,extract_project_name,get_sys_msg
+from helper_functions import extract_description,extract_project_name,get_sys_msg,extract_summary,ask_user_input
 from CustomGroupChat import CustomGroupChat,CustomGroupChatManager
-from typing import List,Dict
+
 
 load_dotenv()
 monitor_agents = False
 
 api_key = os.getenv('OPENAI_API_KEY')
 agentops_api_key = os.getenv('AGENTOPS_API_KEY')
+is_development = os.getenv('ENVIRONMENT') is not None
 
 if not api_key:
     # make a set api_key command using typer and ask to use it here.
@@ -45,7 +48,7 @@ gpt3_config = {
     "temperature" : 0
 }
 
-if monitor_agents:
+if monitor_agents and is_development:
     agentops.init(agentops_api_key)
 
 # -----------------------------------------------------  EXTRACT INFO 2-WAY AGENT CODE  ----------------------------------------------------------
@@ -74,98 +77,107 @@ HumanProxy.register_for_execution(name="ask_user")(ask_human)
 
 # -----------------------------------------------------  GROUP CHAT CODE  ------------------------------------------------------------------------
 
+stored_messages = []
+
 def speaker_sel_func(lastspeaker:Agent,groupchat:CustomGroupChat):
 
-    mess = groupchat.messages
-    last_mess = mess[-1]["content"]
-    def clear_and_append(mess:List[Dict],last:int = 1):
-        num = mess[-last:]
-        mess.clear()
-        for i in num:
-            mess.append(i)
-        
+    print("reached")
+
+    last_message = groupchat.messages[-1]["content"]
+    def clear_and_extract_summary(grp_messages: List[Dict]):
+        # todo - handle case when extract_summary gives None
+        return {
+            'name': grp_messages[-2]["name"],
+            'content': f"Summary from {grp_messages[-2]["name"]}:\n" + extract_summary(grp_messages[-2]["content"]),
+            'role': "assistant"
+        }
+            
     if lastspeaker is initializer:
-        clear_and_append(mess)
+        stored_messages.append(groupchat.messages[0])
         return TemplateAgent,groupchat.messages
     elif lastspeaker is TemplateAgent:
         return HumanProxyGroup,groupchat.messages
-    elif lastspeaker is HumanProxy:
-        if(len(mess) > 1):
-            print(mess[-2]["name"])
-        if "exitcode: 0" in last_mess:
-            clear_and_append(mess)
-            return None,None
-        else:
-            return TemplateAgent
+    elif lastspeaker is TesterAgent:
+        return HumanProxyGroup,groupchat.messages
+    elif lastspeaker is DockerFileAgent:
+        return HumanProxyGroup,groupchat.messages
+    elif lastspeaker is ContainerAgent:
+        return HumanProxyGroup,groupchat.messages
+    elif lastspeaker is HumanProxyGroup:
+        if groupchat.messages[-2]["name"] == "TemplateAgent":
+            if "exitcode: 0" in last_message:
+                stored_messages.append(clear_and_extract_summary(groupchat.messages))
+                groupchat.messages.clear()
+                return TesterAgent,stored_messages
+            else:
+                return TemplateAgent,groupchat.messages
+        elif groupchat.messages[-2]["name"] == "TesterAgent":
+            if "exitcode: 0" in last_message:
+                stored_messages.append(clear_and_extract_summary(groupchat.messages))
+                groupchat.messages.clear()
+                return DockerFileAgent,stored_messages
+            else:
+                return TesterAgent,groupchat.messages
+        elif groupchat.messages[-2]["name"] == "DockerFileAgent":
+            if "exitcode: 0" in last_message:
+                stored_messages.append(clear_and_extract_summary(groupchat.messages))
+                groupchat.messages.clear()
+                return None,None
+            else:
+                return DockerFileAgent,groupchat.messages
+        # elif groupchat.messages[-2]["name"] == "ContainerAgent":
+        #     if "exitcode: 0" in last_message:
+        #         stored_messages.append(clear_and_extract_summary(groupchat.messages))
+        #         groupchat.messages.clear()
+        #         return None,None
+        #     else:
+        #         return ContainerAgent,groupchat.messages
+
 
 initializer = UserProxyAgent(
-    name = "init",
+    name = "initializer",
     code_execution_config=False,
     llm_config=False,
-    human_input_mode="NEVER" 
+    human_input_mode="NEVER",
 )
 
 HumanProxyGroup= UserProxyAgent(
-        "human_proxy",
+        "HumanProxyGroup",
         llm_config = False,  # no LLM used for human proxy
         code_execution_config={
-            "work_dir" : "main",
-            "use_docker" : False
+            "work_dir" : "project_code",
+            "use_docker" : False,
+            "last_n_messages" : 1  # todo
         },
         human_input_mode = "NEVER",
     )      
 
 TemplateAgent = AssistantAgent(
-    "template_agent",
+    "TemplateAgent",
     system_message = get_sys_msg(template_agent_prompt),
     llm_config = gpt4_config,
     code_execution_config = False,
-    human_input_mode = "NEVER", 
-    is_termination_msg = lambda x: (
-        isinstance(x, dict) and 
-        any("exitcode: 0" in line.lower() for line in str(x.get("content", "")).splitlines()[-15:])
-    )
+    human_input_mode = "NEVER"
 )
 
+TesterAgent = AssistantAgent(
+    "TesterAgent",
+    system_message = get_sys_msg(tester_agent_prompt),
+    llm_config = gpt4_config,
+    code_execution_config = False,
+    human_input_mode= "NEVER",
+)
 
-# DockerFileAgent = AssistantAgent(
-#     "DockerFileAgent",
-#     system_message = docker_agent_prompt,
-#     llm_config = gpt4_config,
-#     code_execution_config = False,
-#     human_input_mode= "NEVER",
-# )
-
-# TesterAgent = AssistantAgent(
-#     "TesterAgent",
-#     system_message = tester_agent_prompt,
-#     llm_config = gpt4_config,
-#     code_execution_config = False,
-#     human_input_mode= "NEVER",
-# )
-
-# ToolExecutionAgent = AssistantAgent(
-#         "ToolExecutionAgent",
-#         system_message = tool_execution_agent_prompt,
-#         llm_config = gpt4_config,
-#         human_input_mode= "NEVER",
-#     )
-# ToolExecutionAgent.register_for_llm(description="Function to write content to a file and save it on the machine.")(write_to_file)
-# ToolExecutionAgent.register_for_llm(description="Function to build a Docker image from a Dockerfile present in the current directory.")(build_docker_image)
-
-
-
-# # Adding agent descriptions
-# def add_agent_descriptions(HumanProxyGroup:UserProxyAgent):
-#     DockerFileAgent.description = "Generates and debugs the Dockerfile in case of errors"
-#     TemplateCodeAgent.description = "Generates and debugs the boilerplate code in case of errors"
-#     TesterAgent.description = "Generates and debugs project-specific tests in case of errors"
-#     ToolExecutionAgent.description = "Has access to tools."
-#     HumanProxyGroup.description = "Executes the tools given by ToolExecutionAgent." 
-#     # ContainerAgent: Runs tests inside the container. [todo]
+DockerFileAgent = AssistantAgent(
+    "DockerFileAgent",
+    system_message = get_sys_msg(docker_agent_prompt),
+    llm_config = gpt4_config,
+    code_execution_config = False,
+    human_input_mode= "NEVER",
+)
 
 group_chat = CustomGroupChat(
-    agents=[initializer,TemplateAgent,HumanProxyGroup],
+    agents=[initializer,TemplateAgent,TesterAgent,DockerFileAgent,HumanProxyGroup],
     messages=[],
     select_speaker_auto_verbose=True,
     speaker_selection_method=speaker_sel_func
@@ -176,9 +188,31 @@ group_chat_manager = CustomGroupChatManager(
         llm_config = gpt4_config
     )
 
+# ----------------------------------------------------- CONTAINERIZATION TWO-WAY AGENT CODE -------------------------------------------------------
+
+ContainerAgent = AssistantAgent(
+    "ContainerAgent",
+    system_message=get_sys_msg(container_agent_prompt),
+    llm_config=gpt4_config,
+    code_execution_config = False,
+    human_input_mode="NEVER",
+)
+
+# todo - need to figure out how to build and run tests inside container while in the group chat OR
+#        initiate a new conversation for the build and running processes
+
+
 # -----------------------------------------------------  MAIN FUNCTION  ---------------------------------------------------------------------------
 
-#  message = "I am developing a web application called 'Chat App'. It's built using Python and requires Flask. The base image should be python:3.8.Other dependencies include dotenv and fastAPI.Also no other config required.",
+# usr_input = """
+# A JavaScript-based project named "E-commerce Website," using Node.js (node:14) as the base image, dependencies include Express, Mongoose, and dotenv for environment variable management, particularly for database connectivity.
+# """
+
+# usr_input2 = """
+# I am developing a web application called 'Chat App'. It's built using Python and requires Flask. The base image should be python:3.8.Other dependencies include dotenv and fastAPI.Also no other config required.
+# """
+
+user_input = ask_user_input()
 
 def main():
     print(f"API_KEY SET!")
@@ -186,15 +220,16 @@ def main():
         recipient = ExtractInfoAgent, 
         summary_method = "last_msg",
         silent = True,
-        message = "I am developing a web application called 'Chat App'. It's built using Python and requires Flask. The base image should be python:3.8.Other dependencies include dotenv and fastAPI.Also no other config required.",
+        message = user_input,
     )
     response = ExtractInfoAgent.last_message()["content"]
     project_desc = extract_description(response)
     project_name = extract_project_name(project_desc)
     initializer.initiate_chat(group_chat_manager,message=project_desc)
+    print(stored_messages)
 
 
-    if monitor_agents:
+    if monitor_agents and is_development:
         agentops.end_session("Success") # Success|Fail|Indeterminate
 
 if __name__ == "__main__":

@@ -1,6 +1,10 @@
 from string import Template
 import re
 from SYS_MSG import team_intro
+from rich.console import Console
+from rich.prompt import Prompt
+
+console = Console()
 
 def extract_description(input_str):
     start_marker = "1."
@@ -30,7 +34,7 @@ def get_sys_msg(agent_msg:str):
 
 def extract_summary(text):
     # Define the regular expression pattern to match the summary
-    pattern = r'### Summary:\s*(.*)'
+    pattern = r'(?i)summary.*?\n(.*)'
     
     # Use the re.search() function to find the match
     match = re.search(pattern, text, re.DOTALL)
@@ -40,3 +44,11 @@ def extract_summary(text):
         return match.group(1).strip()
     else:
         return None
+    
+def ask_user_input():
+    console.print("[bold magenta]Welcome to the CodeCatalyst[/bold magenta]!")
+    desc = Prompt.ask("[bold cyan]Tell me about your project and I will make the docker developer environment for you:[/bold cyan]")
+
+    return desc
+
+

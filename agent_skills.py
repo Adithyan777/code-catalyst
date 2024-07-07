@@ -52,11 +52,12 @@ def write_to_file(filename: Annotated[str,"The filename in which you have to sto
     # Example usage of the function:
     # write_to_file("example.txt", "This is the content of the file.")
 
-def build_docker_image(image_name: str) -> Annotated[str,"Console data"]:
+def build_docker_image(image_name: str,path: str) -> Annotated[str,"Console data"]:
     """
-    Function to build a Docker image from a Dockerfile present in the current directory.
+    Function to build a Docker image from a Dockerfile.
     
     :param image_name: The name to assign to the built Docker image.
+    :param path: relative path to the Dockerfile.
     """
     console = Console()
     client = docker.from_env()
@@ -64,7 +65,7 @@ def build_docker_image(image_name: str) -> Annotated[str,"Console data"]:
     try:
         # Build the Docker image
         console.print(f"[bold green]Building Docker image '{image_name}'...[/bold green]")
-        image, logs = client.images.build(path=".", tag=image_name)
+        image, logs = client.images.build(path=path, tag=image_name)
 
         # Display build logs
         for log in logs:
