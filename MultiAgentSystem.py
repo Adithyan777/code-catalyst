@@ -190,7 +190,7 @@ class MultiAgentSystem:
         if lastspeaker is self.initializer:
             task3 = self.add_task_if_not_exists(3,"[dark_orange3]Adding the boileplate code... 🪄")
             self.stored_messages.append(groupchat.messages[0])
-            return self.TemplateAgent,groupchat.messages
+            return self.template_agent,groupchat.messages
         elif lastspeaker is self.template_agent:
             return self.human_proxy_group,groupchat.messages
         elif lastspeaker is self.tester_agent:
