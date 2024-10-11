@@ -16,11 +16,10 @@ def ask_human(question: Annotated[str, "The question you want to ask the user ab
     :return: The answer provided by the user.
     """
     
-    # Use Rich to display the question and prompt for an answer
-    answer = Prompt.ask(f"[bold green]Please answer the question:[/bold green] [yellow]{question}[/yellow]")
-    
-    # Return the provided answer
-    return answer
+    console = Console()
+    console.print(f"\n[yellow]Agent needs information:[/yellow] {question}")
+    response = input("Your response: ")
+    return response
 
     # Example usage of the function:
     # answer = ask_human("Do you have any port-configuration to be made?")

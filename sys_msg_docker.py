@@ -37,7 +37,7 @@ The TEAM contains the following Members:
 - ComposeAgent: Build the image and runs the container according to the docker-compose.yml using an external tool and fixes any issues,if any.
 """
 
-template_agent_prompt = """You are TemplateCodeAgent. 
+docker_template_agent_prompt = """You are TemplateCodeAgent. 
 
 $team_intro
 
@@ -52,7 +52,7 @@ Your ONLY role is to generate project-specific boilerplate code needed for the D
 """
 
 
-tester_agent_prompt = """You are TesterAgent. 
+docker_tester_agent_prompt = """You are TesterAgent. 
 
 $team_intro
 

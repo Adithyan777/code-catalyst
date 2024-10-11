@@ -5,8 +5,7 @@ from rich.panel import Panel
 from pathlib import Path
 import json
 
-from trial2 import initiate_multi_agents_normal
-from trial import initiate_multi_agents_docker
+from MultiAgentSystem import MultiAgentSystem
 
 APP_NAME = "code-catalyst"
 CONFIG_DIR_PATH = Path(typer.get_app_dir(APP_NAME))
@@ -91,15 +90,9 @@ def some_command():
     api_key = check_api_key()
     project_name, project_description = get_project_details()
     dev_env = choose_dev_environment()
-    # console.print(Panel(f"Project Name: {project_name}", style="blue", expand=False))
-    # console.print(Panel(f"Project Description: {project_description}", style="blue", expand=False))
-    # console.print(Panel(f"Chosen Development Environment: {dev_env}", style="blue", expand=False))
-    # Your functionality that requires the API key
-    if(dev_env == "normal"):
-        initiate_multi_agents_normal(api_key,project_name,project_description,console)
-    else:
-        initiate_multi_agents_docker(api_key,project_name,project_description,console)
-    # console.print(f"Using API key: [bold]{api_key}[/bold]")
+
+    agent_system = MultiAgentSystem(api_key,console,env_type=dev_env)
+    agent_system.run(project_name, project_description)
 
 if __name__ == "__main__":
     app()

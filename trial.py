@@ -6,7 +6,7 @@ from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn, TextColumn
 
 import agentops
 
-from sys_msg_docker import docker_extract_info_prompt,template_agent_prompt,tester_agent_prompt,compose_agent_prompt,docker_agent_prompt
+from sys_msg_docker import docker_extract_info_prompt,docker_template_agent_prompt,docker_tester_agent_prompt,compose_agent_prompt,docker_agent_prompt
 from helper_functions import extract_description,get_sys_msg_docker,extract_summary
 from CustomGroupChat import CustomGroupChat,CustomGroupChatManager
 from agent_skills import ask_human,run_docker_compose_up
@@ -173,7 +173,7 @@ def initiate_multi_agents_docker(api_key, project_name, project_description, con
 
     TemplateAgent = AssistantAgent(
         "TemplateAgent",
-        system_message = get_sys_msg_docker(template_agent_prompt),
+        system_message = get_sys_msg_docker(docker_template_agent_prompt),
         llm_config = llm_config,
         code_execution_config = False,
         human_input_mode = "NEVER"
@@ -181,7 +181,7 @@ def initiate_multi_agents_docker(api_key, project_name, project_description, con
 
     TesterAgent = AssistantAgent(
         "TesterAgent",
-        system_message = get_sys_msg_docker(tester_agent_prompt),
+        system_message = get_sys_msg_docker(docker_tester_agent_prompt),
         llm_config = llm_config,
         code_execution_config = False,
         human_input_mode= "NEVER",
