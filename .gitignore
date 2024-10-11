@@ -2,5 +2,5 @@ env/
 __pycache__/
 .env
 .cache/
-trial
-trial2
+try
+project_code/

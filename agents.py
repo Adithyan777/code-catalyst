@@ -6,9 +6,9 @@ from typing import List,Dict
 
 import agentops
 
-from SYS_MSG import extract_info_prompt,template_agent_prompt,tester_agent_prompt,docker_agent_prompt,container_agent_prompt
-from agent_skills import ask_human,write_to_file,build_docker_image
-from helper_functions import extract_description,extract_project_name,get_sys_msg,extract_summary,ask_user_input
+from sys_msg_docker import docker_extract_info_prompt,template_agent_prompt,tester_agent_prompt,docker_agent_prompt,compose_agent_prompt
+from agent_skills import ask_human,build_and_test_docker_image,run_docker_compose_up
+from helper_functions import extract_description,extract_project_name,get_sys_msg_docker,extract_summary,ask_user_input
 from CustomGroupChat import CustomGroupChat,CustomGroupChatManager
 
 
@@ -41,7 +41,8 @@ config_list = config_list_from_dotenv(
 # generating llm_config's from config_list
 gpt4_config = {
     "config_list" : filter_config(config_list,{"model" : ["gpt-4o"]}), # filtering only the gpt-4o model
-    "temperature" : 0
+    "temperature" : 0,
+    "cache_seed" : 49
 }
 gpt3_config = {
     "config_list" : filter_config(config_list,{"model" : ["gpt-3.5-turbo"]}), # filtering only the gpt-3.5-model
@@ -65,7 +66,7 @@ HumanProxy = UserProxyAgent(
 
 ExtractInfoAgent = AssistantAgent(
     "info_extracter",
-    system_message = extract_info_prompt,
+    system_message = docker_extract_info_prompt,
     llm_config = gpt4_config,
     code_execution_config = False,
     human_input_mode = "NEVER", 
@@ -81,7 +82,7 @@ stored_messages = []
 
 def speaker_sel_func(lastspeaker:Agent,groupchat:CustomGroupChat):
 
-    print("reached")
+    # print("reached")
 
     last_message = groupchat.messages[-1]["content"]
     def clear_and_extract_summary(grp_messages: List[Dict]):
@@ -99,9 +100,9 @@ def speaker_sel_func(lastspeaker:Agent,groupchat:CustomGroupChat):
         return HumanProxyGroup,groupchat.messages
     elif lastspeaker is TesterAgent:
         return HumanProxyGroup,groupchat.messages
-    elif lastspeaker is DockerFileAgent:
+    elif lastspeaker is DockerAgent:
         return HumanProxyGroup,groupchat.messages
-    elif lastspeaker is ContainerAgent:
+    elif lastspeaker is ComposeAgent:
         return HumanProxyGroup,groupchat.messages
     elif lastspeaker is HumanProxyGroup:
         if groupchat.messages[-2]["name"] == "TemplateAgent":
@@ -115,23 +116,24 @@ def speaker_sel_func(lastspeaker:Agent,groupchat:CustomGroupChat):
             if "exitcode: 0" in last_message:
                 stored_messages.append(clear_and_extract_summary(groupchat.messages))
                 groupchat.messages.clear()
-                return DockerFileAgent,stored_messages
+                return DockerAgent,stored_messages
             else:
                 return TesterAgent,groupchat.messages
-        elif groupchat.messages[-2]["name"] == "DockerFileAgent":
+        elif groupchat.messages[-2]["name"] == "DockerAgent":
             if "exitcode: 0" in last_message:
                 stored_messages.append(clear_and_extract_summary(groupchat.messages))
                 groupchat.messages.clear()
-                return None,None
+                return ComposeAgent,stored_messages
             else:
-                return DockerFileAgent,groupchat.messages
-        # elif groupchat.messages[-2]["name"] == "ContainerAgent":
-        #     if "exitcode: 0" in last_message:
-        #         stored_messages.append(clear_and_extract_summary(groupchat.messages))
-        #         groupchat.messages.clear()
-        #         return None,None
-        #     else:
-        #         return ContainerAgent,groupchat.messages
+                return DockerAgent,groupchat.messages
+        elif groupchat.messages[-2]["name"] == "ComposeAgent":
+            return ComposeAgent,groupchat.messages
+            # if "TERMINATE" in last_message:
+            #     stored_messages.append(clear_and_extract_summary(groupchat.messages))
+            #     groupchat.messages.clear()
+            #     return None,None
+            # else:
+            #     return ComposeAgent,groupchat.messages
 
 
 initializer = UserProxyAgent(
@@ -150,11 +152,13 @@ HumanProxyGroup= UserProxyAgent(
             "last_n_messages" : 1  # todo
         },
         human_input_mode = "NEVER",
-    )      
+    ) 
+# HumanProxyGroup.register_for_execution(name="build_and_test_docker_image")(build_and_test_docker_image)     
+HumanProxyGroup.register_for_execution(name="run_docker_compose_up")(run_docker_compose_up)
 
 TemplateAgent = AssistantAgent(
     "TemplateAgent",
-    system_message = get_sys_msg(template_agent_prompt),
+    system_message = get_sys_msg_docker(template_agent_prompt),
     llm_config = gpt4_config,
     code_execution_config = False,
     human_input_mode = "NEVER"
@@ -162,22 +166,31 @@ TemplateAgent = AssistantAgent(
 
 TesterAgent = AssistantAgent(
     "TesterAgent",
-    system_message = get_sys_msg(tester_agent_prompt),
+    system_message = get_sys_msg_docker(tester_agent_prompt),
     llm_config = gpt4_config,
     code_execution_config = False,
     human_input_mode= "NEVER",
 )
 
-DockerFileAgent = AssistantAgent(
-    "DockerFileAgent",
-    system_message = get_sys_msg(docker_agent_prompt),
+DockerAgent = AssistantAgent(
+    "DockerAgent",
+    system_message = get_sys_msg_docker(docker_agent_prompt),
     llm_config = gpt4_config,
     code_execution_config = False,
     human_input_mode= "NEVER",
 )
+
+ComposeAgent = AssistantAgent(
+    "ComposeAgent",
+    system_message= get_sys_msg_docker(compose_agent_prompt),
+    llm_config=gpt4_config,
+    code_execution_config = False,
+    human_input_mode= "NEVER",
+)
+ComposeAgent.register_for_llm(name="run_docker_compose_up",description="Run Docker Compose to build and start services.")(run_docker_compose_up)
 
 group_chat = CustomGroupChat(
-    agents=[initializer,TemplateAgent,TesterAgent,DockerFileAgent,HumanProxyGroup],
+    agents=[initializer,TemplateAgent,TesterAgent,DockerAgent,ComposeAgent,HumanProxyGroup],
     messages=[],
     select_speaker_auto_verbose=True,
     speaker_selection_method=speaker_sel_func
@@ -190,27 +203,21 @@ group_chat_manager = CustomGroupChatManager(
 
 # ----------------------------------------------------- CONTAINERIZATION TWO-WAY AGENT CODE -------------------------------------------------------
 
-ContainerAgent = AssistantAgent(
-    "ContainerAgent",
-    system_message=get_sys_msg(container_agent_prompt),
-    llm_config=gpt4_config,
-    code_execution_config = False,
-    human_input_mode="NEVER",
-)
-
 # todo - need to figure out how to build and run tests inside container while in the group chat OR
 #        initiate a new conversation for the build and running processes
 
 
+
+
 # -----------------------------------------------------  MAIN FUNCTION  ---------------------------------------------------------------------------
 
-# usr_input = """
-# A JavaScript-based project named "E-commerce Website," using Node.js (node:14) as the base image, dependencies include Express, Mongoose, and dotenv for environment variable management, particularly for database connectivity.
-# """
+usr_input = """
+A JavaScript-based project named "E-commerce Website," using Node.js (node:14) as the base image, dependencies include Express, Mongoose, and dotenv for environment variable management, particularly for database connectivity.
+"""
 
-# usr_input2 = """
-# I am developing a web application called 'Chat App'. It's built using Python and requires Flask. The base image should be python:3.8.Other dependencies include dotenv and fastAPI.Also no other config required.
-# """
+usr_input2 = """
+I am developing a web application called 'Chat App'. It's built using Python and requires Flask. The base image should be python:3.8.Other dependencies include dotenv and fastAPI.Also no other config required.
+"""
 
 user_input = ask_user_input()
 
@@ -226,6 +233,12 @@ def main():
     project_desc = extract_description(response)
     project_name = extract_project_name(project_desc)
     initializer.initiate_chat(group_chat_manager,message=project_desc)
+    # HumanProxyGroup.clear_history()
+    # HumanProxyGroup.initiate_chat(
+    #     ComposeAgent,
+    #     summary_method="last_msg",
+    #     message = stored_messages
+    # )
     print(stored_messages)
 
 

@@ -1,9 +1,11 @@
-from typing import Annotated
+from typing import Annotated,Tuple
 from rich.prompt import Prompt
 from rich.console import Console
 from pathlib import Path
 import docker
 from docker.errors import BuildError, APIError
+import os
+import subprocess
 
 
 def ask_human(question: Annotated[str, "The question you want to ask the user about the missing info."]) -> Annotated[str, "Answer"]:
@@ -52,42 +54,103 @@ def write_to_file(filename: Annotated[str,"The filename in which you have to sto
     # Example usage of the function:
     # write_to_file("example.txt", "This is the content of the file.")
 
-def build_docker_image(image_name: str,path: str) -> Annotated[str,"Console data"]:
+# todo - if working_dir of agent changes change here also
+def run_docker_compose_up(
+        project_dir:Annotated[str,"relative path to the project directory starting with './project_code' and ending with / eg: (./project_code/project_name/) "]
+    ) -> Annotated[Tuple[str, int],"returns the error if any and the error code"]:
     """
-    Function to build a Docker image from a Dockerfile.
+    Run Docker Compose to build and start services.
+
+    Args:
+        project_dir (str): The directory containing the Docker Compose project.
+
+    Returns:
+        Tuple[str, int]: A tuple containing the output or error message and the error code.
+    """
+    try:
+        os.chdir(project_dir)
+    except FileNotFoundError as fnf_error:
+        return str(fnf_error), 1  # Directory not found error
+
+    commands = ["docker compose up", "docker-compose up"]
     
-    :param image_name: The name to assign to the built Docker image.
-    :param path: relative path to the Dockerfile.
+    for command in commands:
+        try:
+            result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return result.stdout.decode('utf-8')+"\nTERMINATE", 0  # Success
+        except subprocess.CalledProcessError as e:
+            stderr_output = e.stderr.decode('utf-8')
+            if "command not found" in stderr_output:
+                continue  # Try the next command
+            else:
+                return stderr_output, e.returncode  # Return error message and error code
+
+    return "Error: Both 'docker compose up' and 'docker-compose up' failed", 1
+    
+
+def build_and_test_docker_image(
+        project_dir:Annotated[str,"path to the project directory"],
+        image_name:Annotated[str,"name of the Docker image to build"],
+        container_name:Annotated[str,"name of the Docker container to run"],
+        host_port:Annotated[str,"host port to map to the container port"],
+        container_port:Annotated[str,"container port to map to the host port"],
+        command:Annotated[str," full command to be executed which runs the test files generated"]
+    )-> Annotated[str,"Output"]:
+    """
+    Function to build image and run tests inside the container.
+
+    :param project_dir
+    :param image_name
+    :param container_name
+    :param host_port 
+    :param container_port
+    :param command
+    :return output
     """
     console = Console()
     client = docker.from_env()
 
     try:
         # Build the Docker image
-        console.print(f"[bold green]Building Docker image '{image_name}'...[/bold green]")
-        image, logs = client.images.build(path=path, tag=image_name)
+        console.print(f"[bold green]Building the Docker image '{image_name}'...[/bold green]")
+        image, build_logs = client.images.build(path=project_dir, tag=image_name)
+        for log in build_logs:
+            console.print(log.get('stream', '').strip())
 
-        # Display build logs
-        for log in logs:
-            if 'stream' in log:
-                console.print(log['stream'], end='')
+        # Run the container
+        console.print(f"[bold green]Running the container '{container_name}'...[/bold green]")
+        container = client.containers.run(
+            image=image_name,
+            name=container_name,
+            ports={f'{container_port}/tcp': host_port},
+            detach=True
+        )
 
-        # Print success message
-        console.print(f"[bold green]Docker image '{image_name}' built successfully.[/bold green]")
-        return f"[bold green]Docker image '{image_name}' built successfully.[/bold green]"
-    except BuildError as build_err:
-        # Print build error message
-        console.print(f"[bold red]Build failed: {build_err}[/bold red]")
-        return f"[bold red]Build failed: {build_err}[/bold red]"
-    except APIError as api_err:
-        # Print API error message
-        console.print(f"[bold red]Docker API error: {api_err}[/bold red]")
-        return f"[bold red]Docker API error: {api_err}[/bold red]"
+        # Execute the tests inside the container
+        console.print(f"[bold green]Running tests inside the container...[/bold green]")
+        test_result = container.exec_run(command)
+        console.print(test_result.output.decode())
+
+        # Stop and remove the container
+        console.print(f"[bold green]Stopping and removing the container '{container_name}'...[/bold green]")
+        container.stop()
+        container.remove()
+
+        console.print("[bold green]Docker image built and tests executed successfully.[/bold green]")
+        return "Docker image built and tests executed successfully.TERMINATE"
+
+    except docker.errors.BuildError as build_err:
+        console.print(f"[bold red]Error during image build: {build_err}[/bold red]")
+        return f"Error during image build: {build_err}"
+    except docker.errors.ContainerError as container_err:
+        console.print(f"[bold red]Error during container execution: {container_err}[/bold red]")
+        return f"Error during container execution: {container_err}"
+    except docker.errors.DockerException as docker_err:
+        console.print(f"[bold red]General Docker error: {docker_err}[/bold red]")
+        return f"General Docker error: {docker_err}"
     except Exception as e:
-        # Print general error message
         console.print(f"[bold red]An unexpected error occurred: {e}[/bold red]")
-        return f"[bold red]An unexpected error occurred: {e}[/bold red]"
+        return f"An unexpected error occurred: {e}"
 
     # Example usage of the function:
-    # build_docker_image("project_name")
-
+    # build_and_test_docker_image("project_name","image_name","container_name","8080","8080","pytests tests")

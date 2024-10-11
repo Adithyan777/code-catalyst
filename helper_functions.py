@@ -1,6 +1,7 @@
 from string import Template
 import re
-from SYS_MSG import team_intro
+from sys_msg_docker import docker_team_intro
+from sys_msg_normal import normal_team_intro
 from rich.console import Console
 from rich.prompt import Prompt
 
@@ -28,9 +29,13 @@ def extract_project_name(config_str: str) -> str:
         return match.group(1).strip()
     return ""
     
-def get_sys_msg(agent_msg:str):
+def get_sys_msg_docker(agent_msg:str):
     temp = Template(agent_msg)
-    return temp.substitute(team_intro=team_intro)
+    return temp.substitute(team_intro=docker_team_intro)
+
+def get_sys_msg_normal(agent_msg:str):
+    temp = Template(agent_msg)
+    return temp.substitute(team_intro=normal_team_intro)
 
 def extract_summary(text):
     # Define the regular expression pattern to match the summary
@@ -44,11 +49,6 @@ def extract_summary(text):
         return match.group(1).strip()
     else:
         return None
-    
-def ask_user_input():
-    console.print("[bold magenta]Welcome to the CodeCatalyst[/bold magenta]!")
-    desc = Prompt.ask("[bold cyan]Tell me about your project and I will make the docker developer environment for you:[/bold cyan]")
 
-    return desc
 
 
