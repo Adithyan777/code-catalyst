@@ -8,8 +8,8 @@ from rich.prompt import Prompt
 console = Console()
 
 def extract_description(input_str):
-    start_marker = "1."
-    end_marker = "\nTERMINATE"
+    start_marker = "json"
+    end_marker = "TERMINATE"
     
     start_index = input_str.find(start_marker)
     end_index = input_str.find(end_marker, start_index)
@@ -22,12 +22,12 @@ def extract_description(input_str):
     
     return input_str[start_index:end_index]
 
-def extract_project_name(config_str: str) -> str:
-    pattern = r"\*\*Project Name\*\*:\s*-\s*(.*)"
-    match = re.search(pattern, config_str)
-    if match:
-        return match.group(1).strip()
-    return ""
+# def extract_project_name(config_str: str) -> str:
+#     pattern = r"\*\*Project Name\*\*:\s*-\s*(.*)"
+#     match = re.search(pattern, config_str)
+#     if match:
+#         return match.group(1).strip()
+#     return ""
     
 def get_sys_msg_docker(agent_msg:str):
     temp = Template(agent_msg)
