@@ -29,7 +29,7 @@ class MultiAgentSystem:
         self.tasks = {}
         self.llm_config = {
             "config_list": [
-                {"model": "gpt-4", "api_key": self.api_key},
+                {"model": "gpt-4o", "api_key": self.api_key},
                 {"model": "gpt-3.5-turbo", "api_key": self.api_key},
                 # {"model":"claude-3-5-sonnet-20240620","api_key":os.getenv("ANTHROPIC_API_KEY"),"api_type":"anthropic"}
                 # todo - make api_key handling and model_selection in the main.py
