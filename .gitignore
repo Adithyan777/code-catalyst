@@ -5,3 +5,12 @@ __pycache__/
 try
 project_code/
 .DS_Store
+
+# for new-framework
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+.venv
