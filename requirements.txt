@@ -25,7 +25,7 @@ markdown-it-py==3.0.0
 MarkupSafe==2.1.5
 mdurl==0.1.2
 numpy==1.26.4
-openai==1.35.3
+openai==1.51.2
 packaging==23.2
 prompt-toolkit==3.0.36
 psutil==6.0.0

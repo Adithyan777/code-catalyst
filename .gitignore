@@ -4,3 +4,4 @@ __pycache__/
 .cache/
 try
 project_code/
+.DS_Store
