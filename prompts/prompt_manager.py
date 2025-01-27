@@ -31,7 +31,7 @@ class PromptManager:
             raise ValueError(f"Error rendering template: {str(e)}")
 
     @staticmethod
-    def get_template_info(template):
+    def get_template_info(template, **kwargs):
         env = PromptManager._get_env()
         template_path = f"{template}.j2"
         with open(env.loader.get_source(env,template_path)[1]) as file:
@@ -40,11 +40,18 @@ class PromptManager:
         ast = env.parse(post.content)
         variables = meta.find_undeclared_variables(ast)
 
+        # Create template from description and render with kwargs
+        description = post.metadata.get("description", "No description provided")
+        description_template = env.from_string(description)
+        try:
+            rendered_description = description_template.render(**kwargs)
+        except TemplateError:
+            # Fallback to raw description if template rendering fails
+            rendered_description = description
+
         return {
-            "name" : template,
-            "description" : post.metadata.get("description", "No description provided"),
-            "version" : post.metadata.get("version", "No version provided"),
-            "variables" : list(variables),
-            # dictionary version of the YAML frontmatter metadata in the template
-            # "metadata" : post.metadata
+            "name": template,
+            "description": rendered_description,
+            "version": post.metadata.get("version", "No version provided"),
+            "variables": list(variables),
         }
