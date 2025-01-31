@@ -1,8 +1,8 @@
 from prompts.prompt_manager import PromptManager
 
 def main():
-    prompt = PromptManager.get_prompt("compose_agent", setup="docker")
-    info = PromptManager.get_template_info("compose_agent", setup="docker")
+    prompt = PromptManager.get_prompt("extract_info_agent", setup="normal")
+    info = PromptManager.get_template_info("extract_info_agent", setup="normal")
     print(prompt)
     print(info)
 
