@@ -7,6 +7,7 @@ from typing import Iterable, Iterator,List,Dict,Any
 import time
 from phi.utils.pprint import pprint_run_response
 from pydantic import Field,BaseModel
+import sys,os,subprocess
 from phi.utils.timer import Timer
 import json
 from prompts.prompt_manager import PromptManager
@@ -16,6 +17,7 @@ from tools.ask_user import ask_human
 import re
 
 monitor_agents: bool = True
+model_to_use : str = 'gpt-4o-mini-2024-07-18'
 
 # Pydantic model for response from the agent
 class CommandResponse(BaseModel):
@@ -52,9 +54,80 @@ class CommandResponse(BaseModel):
         example="This set of commands initializes a new Node.js project and installs the Express.js framework."
     )
 
+class ExecutionMode(Enum):
+    ALL = "all"
+    STEP_BY_STEP = "step"
+    SAVE_SCRIPT = "save"
+
+class CommandExecutor:
+    def __init__(self, console: Console):
+        self.console = console
+        self.working_dir = os.getcwd()  # Store initial working directory
+
+    def set_working_dir(self, directory: str) -> None:
+        """Set the working directory for command execution"""
+        if os.path.exists(directory):
+            self.working_dir = directory
+            self.console.print(f"[bold blue]Working directory set to:[/bold blue] {directory}")
+        else:
+            os.makedirs(directory, exist_ok=True)
+            self.working_dir = directory
+            self.console.print(f"[bold blue]Created and set working directory to:[/bold blue] {directory}")
+
+    def execute_command(self, command: str) -> bool:
+        try:
+            process = subprocess.run(
+                command,
+                shell=True,
+                text=True,
+                capture_output=True,
+                cwd=self.working_dir  # Use the specified working directory
+            )
+            
+            if process.returncode == 0:
+                self.console.print(f"[bold green]✓ Success:[/bold green] {command}")
+                if process.stdout:
+                    self.console.print(f"[dim]{process.stdout}[/dim]")
+                return True
+            else:
+                self.console.print(f"[bold red]✗ Error:[/bold red] {command}")
+                self.console.print(f"[red]{process.stderr}[/red]")
+                return False
+        except Exception as e:
+            self.console.print(f"[bold red]✗ Exception:[/bold red] {str(e)}")
+            return False
+
+    def save_as_script(self, commands: List[CommandResponse.Commands], project_name: str) -> str:
+        script_ext = ".sh" if sys.platform != "win32" else ".bat"
+        script_name = f"{project_name.lower().replace(' ', '_')}_setup{script_ext}"
+        script_path = os.path.join(self.working_dir, script_name)
+        
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(self.working_dir, exist_ok=True)
+            
+            with open(script_path, "w") as f:
+                if sys.platform != "win32":
+                    f.write("#!/bin/bash\n\n")
+                    f.write('set -e\n\n')  # Exit on error
+                
+                for cmd in commands:
+                    f.write(f"# {cmd.comment}\n")
+                    f.write(f"{cmd.command}\n\n")
+            
+            if sys.platform != "win32":
+                os.chmod(script_path, 0o755)  # Make executable on Unix-like systems
+            
+            return script_path
+            
+        except Exception as e:
+            self.console.print(f"[bold red]Error saving script:[/bold red] {str(e)}")
+            return None
+
 class NormalSetupWorkflow(Workflow):
     apikey: str = Field(...)
     console: Console = Field(...)
+    executor: CommandExecutor = Field(None)
     extractor: Agent = Field(None)
     template_agent: Agent = Field(None)
     tester_agent: Agent = Field(None)
@@ -62,12 +135,13 @@ class NormalSetupWorkflow(Workflow):
     
     def __init__(self, apikey: str, console: Console, **data):
         super().__init__(apikey=apikey, console=console, **data)
+        self.executor = CommandExecutor(console)
         # --------------------------------------
         # DEFINE AGENTS HERE (DO NOT FORGET TO ADD THEM ABOVE)
         # --------------------------------------
         self.extractor = Agent(
             name="extractor",
-            model=OpenAIChat(model='gpt-4o-mini', api_key=self.apikey),
+            model=OpenAIChat(model=model_to_use, api_key=self.apikey),
             system_prompt=PromptManager.get_prompt("extract_info_agent", setup="normal"),
             tools=[ask_human],
             monitoring=monitor_agents
@@ -75,7 +149,7 @@ class NormalSetupWorkflow(Workflow):
 
         self.template_agent = Agent(
             name="template_agent",
-            model=OpenAIChat(model='gpt-4o-mini', api_key=self.apikey),
+            model=OpenAIChat(model=model_to_use, api_key=self.apikey),
             system_prompt=PromptManager.get_prompt("template_agent", setup="normal"),
             structured_outputs=True,
             output_model=CommandResponse,
@@ -84,14 +158,40 @@ class NormalSetupWorkflow(Workflow):
 
         self.tester_agent = Agent(
             name="tester_agent",
-            model=OpenAIChat(model='gpt-4o-mini', api_key=self.apikey),
+            model=OpenAIChat(model=model_to_use, api_key=self.apikey),
             system_prompt=PromptManager.get_prompt("tester_agent", setup="normal"),
             structured_outputs=True,
             output_model=CommandResponse,
             monitoring=monitor_agents
         )
+
+    def execute_commands(self, commands_data: CommandResponse, mode: ExecutionMode, project_name: str) -> None:
+        if mode == ExecutionMode.SAVE_SCRIPT:
+            script_path = self.executor.save_as_script(commands_data.commands, project_name)
+            self.console.print(f"\n[bold green]Script saved as:[/bold green] {script_path}")
+            return
+
+        for command in commands_data.commands:
+            self.console.print(f"\n[bold yellow]▶ Comment:[/bold yellow] {command.comment}")
+            self.console.print(f"[bold cyan]$ Command:[/bold cyan] {command.command}")
+
+            if mode == ExecutionMode.STEP_BY_STEP:
+                confirm = input("\nExecute this command? (y/n/quit): ").lower()
+                if confirm == 'quit':
+                    self.console.print("[yellow]Execution aborted by user[/yellow]")
+                    break
+                elif confirm != 'y':
+                    continue
+
+            success = self.executor.execute_command(command.command)
+            if not success and mode == ExecutionMode.ALL:
+                self.console.print("[red]Execution stopped due to error[/red]")
+                break
     
     def run(self,project_name: str,project_description: str) -> Iterator[RunResponse]:
+        # Set up project directory
+        project_dir = os.path.join(os.getcwd(), project_name.lower().replace(' ', '_'))
+        self.executor.set_working_dir(project_dir)
 
         # --------------------------------------
         # STEP 1 : EXTRACT INFO FROM USER DESCRIPTION
@@ -125,18 +225,38 @@ class NormalSetupWorkflow(Workflow):
 
         print("----------------------------------------")
                 
-        for command in commands_data.commands:
-            # yield RunResponse(
-            #     event=RunEvent.ON_COMMAND,
-            #     message=command.comment,
-            #     data={
-            #         "command": command.command,
-            #         "comment": command.comment
-            #     }
-            # )
-            self.console.print(f"[bold yellow]▶ Comment:[/bold yellow] {command.comment}")
-            self.console.print(f"[bold cyan]$ Command:[/bold cyan] {command.command}")
-            print("\n")
+        # for command in commands_data.commands:
+        #     # yield RunResponse(
+        #     #     event=RunEvent.ON_COMMAND,
+        #     #     message=command.comment,
+        #     #     data={
+        #     #         "command": command.command,
+        #     #         "comment": command.comment
+        #     #     }
+        #     # )
+        #     self.console.print(f"[bold yellow]▶ Comment:[/bold yellow] {command.comment}")
+        #     self.console.print(f"[bold cyan]$ Command:[/bold cyan] {command.command}")
+        #     print("\n")
+
+        # After getting template_response, add execution options
+        self.console.print("\n[bold cyan]Command Execution Options:[/bold cyan]")
+        self.console.print("1) Execute all commands")
+        self.console.print("2) Execute step by step with confirmation")
+        self.console.print("3) Save as script")
+        
+        while True:
+            choice = input("\nEnter your choice (1-3): ")
+            if choice in ['1', '2', '3']:
+                break
+            self.console.print("[red]Invalid choice. Please enter 1, 2, or 3.[/red]")
+
+        mode_map = {
+            '1': ExecutionMode.ALL,
+            '2': ExecutionMode.STEP_BY_STEP,
+            '3': ExecutionMode.SAVE_SCRIPT
+        }
+        
+        self.execute_commands(commands_data, mode_map[choice], project_name)
 
         self.console.print(f"\n[bold green]Summary:[/bold green] {commands_data.summary}\n")
 
@@ -151,10 +271,30 @@ class NormalSetupWorkflow(Workflow):
 
         print("----------------------------------------")
 
-        for command in test_commands_data.commands:
-            self.console.print(f"[bold yellow]▶ Comment:[/bold yellow] {command.comment}")
-            self.console.print(f"[bold cyan]$ Command:[/bold cyan] {command.command}")
-            print("\n")
+        # for command in test_commands_data.commands:
+        #     self.console.print(f"[bold yellow]▶ Comment:[/bold yellow] {command.comment}")
+        #     self.console.print(f"[bold cyan]$ Command:[/bold cyan] {command.command}")
+        #     print("\n")
+
+        # After getting tester_response, add execution options
+        self.console.print("\n[bold cyan]Command Execution Options:[/bold cyan]")
+        self.console.print("1) Execute all commands")
+        self.console.print("2) Execute step by step with confirmation")
+        self.console.print("3) Save as script")
+        
+        while True:
+            choice = input("\nEnter your choice (1-3): ")
+            if choice in ['1', '2', '3']:
+                break
+            self.console.print("[red]Invalid choice. Please enter 1, 2, or 3.[/red]")
+
+        mode_map = {
+            '1': ExecutionMode.ALL,
+            '2': ExecutionMode.STEP_BY_STEP,
+            '3': ExecutionMode.SAVE_SCRIPT
+        }
+        
+        self.execute_commands(test_commands_data, mode_map[choice], project_name)
 
         self.console.print(f"\n[bold green]Summary:[/bold green] {test_commands_data.summary}\n")
 
