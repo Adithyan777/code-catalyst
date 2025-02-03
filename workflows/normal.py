@@ -13,116 +13,12 @@ import json
 from prompts.prompt_manager import PromptManager
 from rich.console import Console
 
+from utils import CommandExecutorTrial as CommandExecutor, Command, CommandGroup, CommandResponse, ExecutionMode, FailedCommand, FailedGroup
 from tools.ask_user import ask_human
 import re
 
 monitor_agents: bool = True
 model_to_use : str = 'gpt-4o-mini-2024-07-18'
-
-# Pydantic model for response from the agent
-class CommandResponse(BaseModel):
-    class Commands(BaseModel):
-        command: str = Field(
-            ...,
-            description="The command to execute",
-            example="npm init -y"
-        )
-        comment: str = Field(
-            ...,
-            description="The comment associated with the command",
-            example="Initialize a new Node.js project"
-        )
-
-    
-    commands: List[Commands] = Field(
-        ...,
-        description="List of commands for the team",
-        example=[
-            {
-                "command": "npm init -y",
-                "comment": "Initialize a new Node.js project"
-            },
-            {
-                "command": "npm install express",
-                "comment": "Install the Express.js framework"
-            }
-        ]
-    )
-    summary: str = Field(
-        ...,
-        description="Summary of the commands for the team",
-        example="This set of commands initializes a new Node.js project and installs the Express.js framework."
-    )
-
-class ExecutionMode(Enum):
-    ALL = "all"
-    STEP_BY_STEP = "step"
-    SAVE_SCRIPT = "save"
-
-class CommandExecutor:
-    def __init__(self, console: Console):
-        self.console = console
-        self.working_dir = os.getcwd()  # Store initial working directory
-
-    def set_working_dir(self, directory: str) -> None:
-        """Set the working directory for command execution"""
-        if os.path.exists(directory):
-            self.working_dir = directory
-            self.console.print(f"[bold blue]Working directory set to:[/bold blue] {directory}")
-        else:
-            os.makedirs(directory, exist_ok=True)
-            self.working_dir = directory
-            self.console.print(f"[bold blue]Created and set working directory to:[/bold blue] {directory}")
-
-    def execute_command(self, command: str) -> bool:
-        try:
-            process = subprocess.run(
-                command,
-                shell=True,
-                text=True,
-                capture_output=True,
-                cwd=self.working_dir  # Use the specified working directory
-            )
-            
-            if process.returncode == 0:
-                self.console.print(f"[bold green]✓ Success:[/bold green] {command}")
-                if process.stdout:
-                    self.console.print(f"[dim]{process.stdout}[/dim]")
-                return True
-            else:
-                self.console.print(f"[bold red]✗ Error:[/bold red] {command}")
-                self.console.print(f"[red]{process.stderr}[/red]")
-                return False
-        except Exception as e:
-            self.console.print(f"[bold red]✗ Exception:[/bold red] {str(e)}")
-            return False
-
-    def save_as_script(self, commands: List[CommandResponse.Commands], project_name: str) -> str:
-        script_ext = ".sh" if sys.platform != "win32" else ".bat"
-        script_name = f"{project_name.lower().replace(' ', '_')}_setup{script_ext}"
-        script_path = os.path.join(self.working_dir, script_name)
-        
-        try:
-            # Create directory if it doesn't exist
-            os.makedirs(self.working_dir, exist_ok=True)
-            
-            with open(script_path, "w") as f:
-                if sys.platform != "win32":
-                    f.write("#!/bin/bash\n\n")
-                    f.write('set -e\n\n')  # Exit on error
-                
-                for cmd in commands:
-                    f.write(f"# {cmd.comment}\n")
-                    f.write(f"{cmd.command}\n\n")
-            
-            if sys.platform != "win32":
-                os.chmod(script_path, 0o755)  # Make executable on Unix-like systems
-            
-            return script_path
-            
-        except Exception as e:
-            self.console.print(f"[bold red]Error saving script:[/bold red] {str(e)}")
-            return None
 
 class NormalSetupWorkflow(Workflow):
     apikey: str = Field(...)
@@ -167,26 +63,35 @@ class NormalSetupWorkflow(Workflow):
 
     def execute_commands(self, commands_data: CommandResponse, mode: ExecutionMode, project_name: str) -> None:
         if mode == ExecutionMode.SAVE_SCRIPT:
-            script_path = self.executor.save_as_script(commands_data.commands, project_name)
+            script_path = self.executor.save_as_script(commands_data.groups, project_name)
             self.console.print(f"\n[bold green]Script saved as:[/bold green] {script_path}")
             return
 
-        for command in commands_data.commands:
-            self.console.print(f"\n[bold yellow]▶ Comment:[/bold yellow] {command.comment}")
-            self.console.print(f"[bold cyan]$ Command:[/bold cyan] {command.command}")
+        execution_result = self.executor.execute_command_groups(commands_data, mode)
+        
+        # Handle failed groups
+        if execution_result["failed_groups"]:
+            self.console.print("\n[bold red]Failed Commands Summary:[/bold red]")
+            for failed_group in execution_result["failed_groups"]:
+                self.console.print(f"\n[bold yellow]Group:[/bold yellow] {failed_group.group_name}")
+                self.console.print(f"[bold yellow]Description:[/bold yellow] {failed_group.description}")
+                
+                for failed_cmd in failed_group.failed_commands:
+                    self.console.print("\n[red]Failed Command:[/red]")
+                    self.console.print(f"Command: {failed_cmd.command}")
+                    self.console.print(f"Error: {failed_cmd.error}")
 
-            if mode == ExecutionMode.STEP_BY_STEP:
-                confirm = input("\nExecute this command? (y/n/quit): ").lower()
-                if confirm == 'quit':
-                    self.console.print("[yellow]Execution aborted by user[/yellow]")
-                    break
-                elif confirm != 'y':
-                    continue
+        self.console.print(f"\n[bold green]Summary:[/bold green] {commands_data.summary}\n"+ 
+                    (f"\nNote: {len(execution_result['failed_groups'])} groups had failures" 
+                    if execution_result['failed_groups'] else ""))
+        
+        self.messages.append({
+            "role": "assistant", 
+            "content": f"Summary from TemplateAgent: {commands_data.summary}" + 
+                    (f"\nNote: {len(execution_result['failed_groups'])} groups had failures" 
+                    if execution_result['failed_groups'] else "")
+        })
 
-            success = self.executor.execute_command(command.command)
-            if not success and mode == ExecutionMode.ALL:
-                self.console.print("[red]Execution stopped due to error[/red]")
-                break
     
     def run(self,project_name: str,project_description: str) -> Iterator[RunResponse]:
         # Set up project directory
@@ -258,14 +163,20 @@ class NormalSetupWorkflow(Workflow):
         
         self.execute_commands(commands_data, mode_map[choice], project_name)
 
-        self.console.print(f"\n[bold green]Summary:[/bold green] {commands_data.summary}\n")
+        # self.console.print(f"\n[bold green]Summary:[/bold green] {commands_data.summary}\n")
 
-        self.messages.append({"role": "assistant", "content" : "Summary from TemplateAgent: " + commands_data.summary})
+        # self.messages.append({"role": "assistant", "content" : "Summary from TemplateAgent: " + commands_data.summary})
+
+        return RunResponse(
+            event = RunEvent.workflow_completed,
+            message = "Workflow completed successfully",
+        )
     
         # ----------------------------------------
         # STEP 3 : TESTER AGENT
         # ----------------------------------------
 
+    
         tester_response = self.tester_agent.run(messages=self.messages)
         test_commands_data: CommandResponse = tester_response.content
 
@@ -298,7 +209,4 @@ class NormalSetupWorkflow(Workflow):
 
         self.console.print(f"\n[bold green]Summary:[/bold green] {test_commands_data.summary}\n")
 
-        return RunResponse(
-            event = RunEvent.workflow_completed,
-            message = "Workflow completed successfully",
-        )
+        
