@@ -13,7 +13,7 @@ import json
 from prompts.prompt_manager import PromptManager
 from rich.console import Console
 
-from utils import CommandExecutorTrial as CommandExecutor, Command, CommandGroup, CommandResponse, ExecutionMode, FailedCommand, FailedGroup
+from utils import CommandExecutor, Command, CommandGroup, CommandResponse, ExecutionMode, FailedCommand, FailedGroup
 from tools.ask_user import ask_human
 import re
 
@@ -68,11 +68,11 @@ class NormalSetupWorkflow(Workflow):
             return
 
         execution_result = self.executor.execute_command_groups(commands_data, mode)
-        
+        failed_groups: List[FailedGroup] = execution_result["failed_groups"]
         # Handle failed groups
-        if execution_result["failed_groups"]:
+        if failed_groups:
             self.console.print("\n[bold red]Failed Commands Summary:[/bold red]")
-            for failed_group in execution_result["failed_groups"]:
+            for failed_group in failed_groups:
                 self.console.print(f"\n[bold yellow]Group:[/bold yellow] {failed_group.group_name}")
                 self.console.print(f"[bold yellow]Description:[/bold yellow] {failed_group.description}")
                 
