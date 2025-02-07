@@ -304,3 +304,12 @@ class CommandExecutor:
         except Exception as e:
             self.console.print(f"[bold red]Error saving script:[/bold red] {str(e)}")
             return None
+        
+def save_model_as_json(model, filename):
+    with open(filename, "w") as f:
+        f.write(model.json())
+
+def load_json_as_model(filename, model):
+    with open(filename, "r") as f:
+        data = f.read()
+        return model.parse_raw(data)

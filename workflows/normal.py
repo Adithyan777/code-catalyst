@@ -12,6 +12,7 @@ from phi.utils.timer import Timer
 import json
 from prompts.prompt_manager import PromptManager
 from rich.console import Console
+from utils import save_model_as_json
 
 from utils import CommandExecutor, Command, CommandGroup, CommandResponse, ExecutionMode, FailedCommand, FailedGroup, GroupRecoveryPlan
 from tools.ask_user import ask_human
@@ -86,6 +87,63 @@ class NormalSetupWorkflow(Workflow):
             monitoring=monitor_agents
         )
 
+    def print_failed_groups_summary(
+        self,
+        independent_groups: List[FailedGroup], dependent_groups: List[FailedGroup]
+    ) -> None:
+        """
+        Prints a summary of failed groups.
+        """
+        total_failures = len(independent_groups) + len(dependent_groups)
+        print("Failed Group Summary:")
+        print(f"{total_failures} failures detected.\n")
+        
+        # Print independent failed groups
+        print("┌─ Independent:")
+        if independent_groups:
+            for group in independent_groups:
+                print(f"│  • {group.group_name}")
+        else:
+            print("│  (None)")
+        
+        # Print dependent failed groups
+        print("└─ Dependent:")
+        if dependent_groups:
+            for group in dependent_groups:
+                print(f"   • {group.group_name}")
+        else:
+            print("   (None)")
+        print("\n")
+
+    def print_command_summary(self, response: CommandResponse) -> None:
+        """
+        Prints a command summary in the CLI.
+        """
+        groups = response.groups
+        num_groups = len(groups)
+        
+        print("Command Execution")
+        print(f"{num_groups} command groups detected.\n")
+        
+        for i, group in enumerate(groups):
+            # Choose the correct prefix based on the group's position.
+            if i == 0:
+                group_prefix = "┌"
+            elif i == num_groups - 1:
+                group_prefix = "└"
+            else:
+                group_prefix = "├"
+            
+            # Print the group header.
+            print(f"{group_prefix}─ {group.name}:")
+            
+            # Use a vertical line indent for all groups except the last.
+            # For the last group, use a plain space indent.
+            command_indent = "   " if i == num_groups - 1 else "│  "
+            for cmd in group.commands:
+                print(f"{command_indent}• {cmd.comment}")
+            print("\n")
+
     def handle_failed_group(self, failed_group: FailedGroup, all_group_commands: List[Command]) -> bool:
         """
         Handles a failed group and attempts recovery. Returns True if fixed successfully.
@@ -128,6 +186,7 @@ class NormalSetupWorkflow(Workflow):
         """
 
         recovery_plan: GroupRecoveryPlan = self.recovery_agent.run(prompt).content
+        # save_model_as_json(recovery_plan, "recovery_plan.json")
 
         self.console.print(f"\n[bold cyan]Recovery Analysis:[/bold cyan] {recovery_plan.analysis}")
         
@@ -185,8 +244,7 @@ class NormalSetupWorkflow(Workflow):
                 if not is_dependent:
                     independent_groups.append(group)
 
-            self.console.print(f"\n[bold yellow]Independent Failed Groups:[/bold yellow] {[g.group_name for g in independent_groups]}")
-            self.console.print(f"[bold yellow]Dependent Failed Groups:[/bold yellow] {[g.group_name for g in dependent_groups]}")
+            self.print_failed_groups_summary(independent_groups, dependent_groups)
 
             proceed = questionary.confirm(
                 "Attempt to fix failed groups?",
@@ -243,29 +301,11 @@ class NormalSetupWorkflow(Workflow):
         template_response = self.template_agent.run(extracted_content)
         
         commands_data: CommandResponse = template_response.content
+        # save_model_as_json(commands_data, "commands_data.json")
 
         print("----------------------------------------")
-                
-        # for command in commands_data.commands:
-        #     # yield RunResponse(
-        #     #     event=RunEvent.ON_COMMAND,
-        #     #     message=command.comment,
-        #     #     data={
-        #     #         "command": command.command,
-        #     #         "comment": command.comment
-        #     #     }
-        #     # )
-        #     self.console.print(f"[bold yellow]▶ Comment:[/bold yellow] {command.comment}")
-        #     self.console.print(f"[bold cyan]$ Command:[/bold cyan] {command.command}")
-        #     print("\n")
 
-        # # After getting template_response, add execution options
-        # self.console.print("\n[bold cyan]Command Execution Options:[/bold cyan]")
-        # self.console.print("1) Execute all commands")
-        # self.console.print("2) Execute step by step with confirmation")
-        # self.console.print("3) Save as script")
-        
-        # self.console.print("\n")
+        self.print_command_summary(commands_data)
         
         mode_choice = questionary.select(
             "Select execution mode:",
