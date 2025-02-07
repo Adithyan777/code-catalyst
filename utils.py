@@ -3,6 +3,7 @@ from enum import Enum
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from rich.console import Console
+import questionary
 
 
 class CommandType(Enum):
@@ -67,6 +68,20 @@ class FailedGroup(BaseModel):
     group_name: str = Field(..., description="Name of the failed group")
     description: str = Field(..., description="Description of the failed group")
     failed_commands: List[FailedCommand] = Field(..., description="List of failed commands in this group")
+
+class FixedCommand(BaseModel):
+    original_command: str = Field(..., description="The original failed command")
+    fixed_command: str = Field(..., description="The fixed version of the command")
+    explanation: str = Field(..., description="Explanation of what was fixed and why")
+
+class GroupRecoveryPlan(BaseModel):
+    group_name: str = Field(..., description="Name of the group being fixed")
+    analysis: str = Field(..., description="Analysis of what went wrong in the group")
+    fixed_commands: List[FixedCommand] = Field(..., description="List of fixed commands")
+    additional_instructions: str = Field(
+        # default="",
+        description="Any additional instructions or prerequisites needed"
+    )
 
 class CommandExecutor:
     """
@@ -160,9 +175,13 @@ class CommandExecutor:
         self.console.print("="*50 + "\n")
         
         if step_by_step:
-            response = input("Execute this group? (y/n): ").lower().strip()
-            if not response.startswith('y'):
-                return None  # Return None instead of empty dict to indicate skip
+            proceed = questionary.confirm(
+                f"Execute group '{group.name}'?",
+                default=True
+            ).ask()
+            
+            if not proceed:
+                return None
 
         for cmd in group.commands:
             if group_failed:
@@ -211,7 +230,9 @@ class CommandExecutor:
 
             if not executable_groups:
                 self.console.print("[bold red]Error: Dependency cycle detected or all remaining groups have unmet dependencies[/bold red]")
-                break
+                if questionary.confirm("Would you like to abort execution?", default=True).ask():
+                    break
+                continue
 
             current_group = executable_groups[0]  # Process one group at a time
             results = self.execute_group(
